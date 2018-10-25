@@ -78,6 +78,7 @@
 
 - `id`
 - `type_id`
+- `parent`
 - `semantic_tags`
 - `is_alive`
 - `get_world()`
