@@ -33,7 +33,7 @@ else
 fi
 
 function get_carla_version {
-  git describe --tags --always
+  echo "0.9.3"
 }
 
 function copy_if_changed {
