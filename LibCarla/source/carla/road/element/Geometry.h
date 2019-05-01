@@ -7,11 +7,13 @@
 #pragma once
 
 #include "carla/Debug.h"
+#include "carla/Exception.h"
 #include "carla/geom/Location.h"
 #include "carla/geom/Math.h"
 #include "carla/road/element/cephes/fresnel.h"
 
 #include <cmath>
+#include <stdexcept>
 
 namespace carla {
 namespace road {
@@ -31,20 +33,13 @@ namespace element {
     DirectedPoint(const geom::Location &l, double t)
       : location(l),
         tangent(t) {}
-    DirectedPoint(double x, double y, double z, double t)
+    DirectedPoint(float x, float y, float z, double t)
       : location(x, y, z),
         tangent(t) {}
 
-    geom::Location location = {0, 0, 0};
+    geom::Location location = {0.0f, 0.0f, 0.0f};
     double tangent = 0.0; // [radians]
     double pitch = 0.0;   // [radians]
-    bool valid = true;
-
-    static DirectedPoint Invalid() {
-      DirectedPoint d;
-      d.valid = false;
-      return d;
-    }
 
     void ApplyLateralOffset(double lateral_offset) {
       /// @todo Z axis??
@@ -81,9 +76,9 @@ namespace element {
 
     virtual ~Geometry() = default;
 
-    virtual const DirectedPoint PosFromDist(double dist) const = 0;
+    virtual DirectedPoint PosFromDist(double dist) const = 0;
 
-    virtual std::pair<double, double> DistanceTo(const geom::Location &p) const = 0;
+    virtual std::pair<float, float> DistanceTo(const geom::Location &p) const = 0;
 
   protected:
 
@@ -111,7 +106,7 @@ namespace element {
     geom::Location _start_position; // [meters]
   };
 
-  class GeometryLine : public Geometry {
+  class GeometryLine final : public Geometry {
   public:
 
     GeometryLine(
@@ -121,9 +116,9 @@ namespace element {
         const geom::Location &start_pos)
       : Geometry(GeometryType::LINE, start_offset, length, heading, start_pos) {}
 
-    const DirectedPoint PosFromDist(const double dist) const override {
-      assert(dist > 0);
-      assert(_length > 0.0);
+    DirectedPoint PosFromDist(double dist) const override {
+      dist = geom::Math::Clamp(dist, 0.0, _length);
+      DEBUG_ASSERT(_length > 0.0);
       DirectedPoint p(_start_position, _heading);
       p.location.x += dist * std::cos(p.tangent);
       p.location.y += dist * std::sin(p.tangent);
@@ -133,10 +128,11 @@ namespace element {
     /// Returns a pair containing:
     /// - @b first:  distance to the nearest point in this line from the
     ///              begining of the shape.
-    /// - @b second: Euclidean distance from the nearest point in this line to p.
+    /// - @b second: Euclidean distance from the nearest point in this line to
+    /// p.
     ///   @param p point to calculate the distance
-    std::pair<double, double> DistanceTo(const geom::Location &p) const override {
-      return geom::Math::DistSegmentPoint(
+    std::pair<float, float> DistanceTo(const geom::Location &p) const override {
+      return geom::Math::DistanceSegmentToPoint(
           p,
           _start_position,
           PosFromDist(_length).location);
@@ -144,7 +140,7 @@ namespace element {
 
   };
 
-  class GeometryArc : public Geometry {
+  class GeometryArc final : public Geometry {
   public:
 
     GeometryArc(
@@ -156,17 +152,18 @@ namespace element {
       : Geometry(GeometryType::ARC, start_offset, length, heading, start_pos),
         _curvature(curv) {}
 
-    const DirectedPoint PosFromDist(double dist) const override {
-      assert(dist > 0);
-      assert(_length > 0.0);
-      assert(std::fabs(_curvature) > 1e-15);
+    DirectedPoint PosFromDist(double dist) const override {
+      dist = geom::Math::Clamp(dist, 0.0, _length);
+      DEBUG_ASSERT(_length > 0.0);
+      DEBUG_ASSERT(std::fabs(_curvature) > 1e-15);
       const double radius = 1.0 / _curvature;
+      constexpr double pi_half = geom::Math::Pi<double>() / 2.0;
       DirectedPoint p(_start_position, _heading);
-      p.location.x -= radius * std::cos(p.tangent + geom::Math::pi_half());
-      p.location.y -= radius * std::sin(p.tangent + geom::Math::pi_half());
-      p.tangent -= dist * _curvature;
-      p.location.x += radius * std::cos(p.tangent + geom::Math::pi_half());
-      p.location.y += radius * std::sin(p.tangent + geom::Math::pi_half());
+      p.location.x += radius * std::cos(p.tangent + pi_half);
+      p.location.y += radius * std::sin(p.tangent + pi_half);
+      p.tangent += dist * _curvature;
+      p.location.x -= radius * std::cos(p.tangent + pi_half);
+      p.location.y -= radius * std::sin(p.tangent + pi_half);
       return p;
     }
 
@@ -175,16 +172,16 @@ namespace element {
     ///              begining of the shape.
     /// - @b second: Euclidean distance from the nearest point in this arc to p.
     ///   @param p point to calculate the distance
-    std::pair<double, double> DistanceTo(const geom::Location &p) const override {
-      return geom::Math::DistArcPoint(
+    std::pair<float, float> DistanceTo(const geom::Location &p) const override {
+      return geom::Math::DistanceArcToPoint(
           p,
           _start_position,
-          _length,
-          _heading,
-          _curvature);
+          static_cast<float>(_length),
+          static_cast<float>(_heading),
+          static_cast<float>(_curvature));
     }
 
-    double GetCurvature() {
+    double GetCurvature() const {
       return _curvature;
     }
 
@@ -193,7 +190,7 @@ namespace element {
     double _curvature;
   };
 
-  class GeometrySpiral : public Geometry {
+  class GeometrySpiral final : public Geometry {
   public:
 
     GeometrySpiral(
@@ -215,13 +212,13 @@ namespace element {
       return _curve_end;
     }
 
-    const DirectedPoint PosFromDist(double dist) const override {
+    DirectedPoint PosFromDist(double dist) const override {
       // not working yet with negative values
-      assert(dist > 0);
-      assert(_length > 0.0);
-      assert(std::fabs(_curve_end) > 1e-15);
+      dist = geom::Math::Clamp(dist, 0.0, _length);
+      DEBUG_ASSERT(_length > 0.0);
+      DEBUG_ASSERT(std::fabs(_curve_end) > 1e-15);
       const double radius = 1.0 / _curve_end;
-      const double extra_norm = 1.0 / std::sqrt(geom::Math::pi_half());
+      const double extra_norm = 1.0 / std::sqrt(geom::Math::Pi<double>() / 2.0);
       const double norm = 1.0 / std::sqrt(2.0 * radius * _length);
       const double length = dist * norm;
       double S, C;
@@ -239,9 +236,8 @@ namespace element {
     }
 
     /// @todo
-    std::pair<double, double> DistanceTo(const geom::Location &) const override {
-      DEBUG_ERROR;
-      return {0.0, 0.0};
+    std::pair<float, float> DistanceTo(const geom::Location &) const override {
+      throw_exception(std::runtime_error("not implemented"));
     }
 
   private:

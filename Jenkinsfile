@@ -22,10 +22,11 @@ pipeline {
                 sh 'make LibCarla'
                 sh 'make PythonAPI'
                 sh 'make CarlaUE4Editor'
+                sh 'make examples'
             }
             post {
                 always {
-                    archiveArtifacts 'PythonAPI/dist/*.egg'
+                    archiveArtifacts 'PythonAPI/carla/dist/*.egg'
                 }
             }
         }
@@ -51,14 +52,30 @@ pipeline {
         stage('Package') {
             steps {
                 sh 'make package'
+                sh 'make export-maps ARGS="--map=/Game/Carla/Maps/Town06 --file=Town06"'
+                sh 'make export-maps ARGS="--map=/Game/Carla/Maps/Town07 --file=Town07"'
             }
             post {
                 always {
                     archiveArtifacts 'Dist/*.tar.gz'
+                    archiveArtifacts 'ExportedMaps/*.tar.gz'
                 }
             }
         }
 
+        stage('Smoke Tests') {
+            steps {
+                sh 'DISPLAY= ./Dist/*/LinuxNoEditor/CarlaUE4.sh --carla-rpc-port=3654 --carla-streaming-port=0 > CarlaUE4.log &'
+                sh 'make smoke_tests ARGS="--xml"'
+                sh 'make run-examples ARGS="localhost 3654"'
+            }
+            post {
+                always {
+                    archiveArtifacts 'CarlaUE4.log'
+                    junit 'Build/test-results/smoke-tests-*.xml'
+                }
+            }
+        }
     }
 
     post {

@@ -8,6 +8,7 @@
 #include "WheeledVehicleAIController.h"
 
 #include "MapGen/RoadMap.h"
+#include "Traffic/RoutePlanner.h"
 #include "Vehicle/CarlaWheeledVehicle.h"
 
 #include "EngineUtils.h"
@@ -138,8 +139,14 @@ void AWheeledVehicleAIController::Tick(const float DeltaTime)
 
   if (bAutopilotEnabled)
   {
-    Vehicle->ApplyVehicleControl(AutopilotControl);
+    Vehicle->ApplyVehicleControl(AutopilotControl, EVehicleInputPriority::Autopilot);
   }
+  else if (!bControlIsSticky)
+  {
+    Vehicle->ApplyVehicleControl(FVehicleControl{}, EVehicleInputPriority::Relaxation);
+  }
+
+  Vehicle->FlushVehicleControl();
 }
 
 // =============================================================================
@@ -161,6 +168,29 @@ void AWheeledVehicleAIController::ConfigureAutopilot(const bool Enable)
       bAutopilotEnabled ?
       ECarlaWheeledVehicleState::FreeDriving :
       ECarlaWheeledVehicleState::AutopilotOff);
+
+  /// @todo Workaround for a race condition between client and server when
+  /// enabling autopilot right after initializing a vehicle.
+  if (bAutopilotEnabled)
+  {
+    for (TActorIterator<ARoutePlanner> It(GetWorld()); It; ++It)
+    {
+      ARoutePlanner *RoutePlanner = *It;
+      // Check if we are inside this route planner.
+      TSet<AActor *> OverlappingActors;
+      RoutePlanner->TriggerVolume->GetOverlappingActors(
+          OverlappingActors,
+          ACarlaWheeledVehicle::StaticClass());
+      for (auto *Actor : OverlappingActors)
+      {
+        if (Actor == Vehicle)
+        {
+          RoutePlanner->AssignRandomRoute(*this);
+          return;
+        }
+      }
+    }
+  }
 }
 
 // =============================================================================

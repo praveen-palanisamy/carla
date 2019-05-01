@@ -6,7 +6,7 @@
 
 #pragma once
 
-#include "carla/streaming/detail/AsioThreadPool.h"
+#include "carla/ThreadPool.h"
 #include "carla/streaming/detail/tcp/Server.h"
 #include "carla/streaming/low_level/Server.h"
 
@@ -40,6 +40,10 @@ namespace streaming {
       _service.Stop();
     }
 
+    auto GetLocalEndpoint() const {
+      return _server.GetLocalEndpoint();
+    }
+
     void SetTimeout(time_duration timeout) {
       _server.SetTimeout(timeout);
     }
@@ -64,7 +68,7 @@ namespace streaming {
 
     // The order of these two arguments is very important.
 
-    detail::AsioThreadPool _service;
+    ThreadPool _service;
 
     underlying_server _server;
   };
